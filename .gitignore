@@ -1,3 +1,6 @@
+_tmp.png
+.ipynb_checkpoints
+
 *.py[cod]
 
 # C extensions
