@@ -20,17 +20,20 @@ cdef float calc_t0(float t1, float t2, float C, float P):
 cdef class SGM:
     cdef float P1
     cdef float P2
+    cdef float[:,:,:] R
+    cdef float[:,:,:] Cost
+    cdef float[:,:] min_cost
 
     def __init__(self, P1, P2):
         self.P1 = P1
         self.P2 = P2
 
-    cdef float cost_func(self, float[:] R, float[:] Cost, float[:] PrevCost, float prev_min):
+    cdef float cost_func(self, int n, float * R, float * Cost, float * PrevCost, float prev_min):
         cdef float cur_min, v
         cdef float P1 = self.P1, P2 = self.P2
         cdef int k
         cur_min = INF
-        for k in xrange(1, Cost.shape[0]-1):
+        for k in xrange(1, n-1):
             v = PrevCost[k]
             v = min(v, P1 + PrevCost[k-1])
             v = min(v, P1 + PrevCost[k+1])
@@ -40,54 +43,87 @@ cdef class SGM:
             cur_min = min(v, cur_min)
         return cur_min
 
-    def calc_cost(self, float[:,:,:] R, float[:,:,:] TotalCost, int di, int dj):
+    def calc_cost(self, float[:,:,:] TotalCost, int di, int dj):
         cdef int h, w, d
-        h, w, d = R.shape[0], R.shape[1], R.shape[2]
-        cdef float[:,:,:] Cost = np.zeros((2, w+2, d+2), np.float32)
-        Cost[:,:,0], Cost[:,:,d+1] = INF, INF
-        cdef float[:,:] min_cost = np.zeros((2, w+2), np.float32)
+        h, w, d = self.R.shape[0], self.R.shape[1], self.R.shape[2]
+        self.Cost = np.zeros((2, w+2, d+2), np.float32)
+        self.Cost[:,:,0], self.Cost[:,:,d+1] = INF, INF
+        self.min_cost = np.zeros((2, w+2), np.float32)
         cdef bint flip = (di < 0) or (di == 0 and dj < 0)
         
-        cdef int i, j, i1, j1, k
+        cdef int i, j, i1, j1, k, pi, pj
         for i1 in xrange(h):
             for j1 in xrange(w):
                 i, j = i1, j1
                 if flip:
                     i, j = h-i1-1, w-j1-1
-                min_cost[i&1, 1+j] = self.cost_func(R[i,j], Cost[i&1, 1+j], Cost[(i-di)&1, 1+j-dj], min_cost[(i-di)&1, 1+j-dj])
+                pi = i - di
+                pj = j - dj
+
+                self.min_cost[i&1, 1+j] = self.cost_func(self.Cost.shape[2], &self.R[i,j,0], 
+                    &self.Cost[i&1, 1+j, 0], 
+                    &self.Cost[pi&1, 1+pj, 0], 
+                    self.min_cost[pi&1, 1+pj])
                 for k in xrange(d):
-                    TotalCost[i, j, k] += Cost[i&1, 1+j, 1+k]
+                    TotalCost[i, j, k] += self.Cost[i&1, 1+j, 1+k]
 
-    def __call__(self, R):
-        Cost = np.zeros_like(R)
-        for di, dj in [(1, 1), (1, 0), (1, -1), (0, 1), (0, -1), (-1, 1), (-1, 0), (-1, -1)]:
-            self.calc_cost(R, Cost, di, dj)
-        return Cost
+    def __call__(self, R, paths=8):
+        paths8  = [(1, 1), (1, 0), (1, -1), (0, 1), (0, -1), (-1, 1), (-1, 0), (-1, -1)]
+        if paths == 8:
+            paths = paths8
 
-
-
-cdef class GeodSGM(SGM):
-    def __init__(self, P1, P2):
-        SGM.__init__(self, P1, P1)
-
-
-    cdef float cost_func(self, float[:] R, float[:] Cost, float[:] PrevCost, float prev_min):
-        cdef float cur_min, v, C
-        cdef float P1 = self.P1, P2 = self.P2
-        cdef int k
-        cur_min = INF
-        for k in xrange(1, Cost.shape[0]-1):
-            C = R[k-1]
-            v = calc_t0(PrevCost[k], PrevCost[k-1], C, P1)
-            v = min(v, calc_t0(PrevCost[k], PrevCost[k+1], C, P1))
-            v = min(v, P2 + prev_min)
-            v -= prev_min
-
-            Cost[k] = v
-            cur_min = min(v, cur_min)
-        return cur_min
+        self.R = R
+        TotalCost = np.zeros_like(R)
+        for di, dj in paths:
+            self.calc_cost(TotalCost, di, dj)
+        return TotalCost
 
 
+
+#Ecdef class GeodSGM(SGM):
+#E    def __init__(self, P1, P2):
+#E        SGM.__init__(self, P1, P2)
+#E
+#E    cdef float cost_func(self, int n, float * R, float * Cost, float * PrevCost, float prev_min):
+#E        cdef float cur_min, v, C
+#E        cdef float P1 = self.P1, P2 = self.P2
+#E        cdef int k
+#E        cur_min = INF
+#E        for k in xrange(1, n-1):
+#E            C = R[k-1]
+#E            v = calc_t0(PrevCost[k], PrevCost[k-1], C, P1)
+#E            v = min(v, calc_t0(PrevCost[k], PrevCost[k+1], C, P1))
+#E            v = min(v, P2 + prev_min)
+#E            v -= prev_min
+#E
+#E            Cost[k] = v
+#E            cur_min = min(v, cur_min)
+#E        return cur_min
+
+
+#cdef class SGM_P2:
+#    cdef float P1
+#
+#    def __init__(self, P1, img):
+#        self.P1 = P1
+#        self.P2 = P2
+#
+#    def calc_p2
+#
+#    cdef float cost_func(self, int n, float * R, float * Cost, float * PrevCost, float prev_min):
+#        cdef float cur_min, v
+#        cdef float P1 = self.P1, P2 = self.P2
+#        cdef int k
+#        cur_min = INF
+#        for k in xrange(1, n-1):
+#            v = PrevCost[k]
+#            v = min(v, P1 + PrevCost[k-1])
+#            v = min(v, P1 + PrevCost[k+1])
+#            v = min(v, P2 + prev_min)
+#            v += R[k-1] - prev_min
+#            Cost[k] = v
+#            cur_min = min(v, cur_min)
+#        return cur_min
 
 
 def census3(uint8_t[:,:] A):
